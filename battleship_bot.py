@@ -17,8 +17,8 @@ Have fun!
 """
 
 import random
-from typing import Any, Dict, Optional, Set, Tuple
-from battleship_api import BattleshipBotAPI, run_bot, ABILITY_CODES
+from typing import Any, Dict, List, Optional, Set, Tuple
+from battleship_api import BattleshipBotAPI, run_bot, ABILITY_CODES, BOARD_SIZE
 
 class MyBattleshipBot(BattleshipBotAPI):
     def ability_selection(self) -> list:
@@ -136,26 +136,92 @@ class MyBattleshipBot(BattleshipBotAPI):
                 return False
 
         return True
-
     
+    # !---------------- COMBAT STRATEGY ----------------
     def combat_strategy(self, game_state: dict) -> dict:
+        
         """Choose a combat move."""
-        # TODO: Replace with your strategy
         available_abilities = self._get_available_abilities(game_state)
         opponent_grid = self._get_opponent_grid(game_state)
         available_cells = self._get_available_cells(opponent_grid)
         
-        if available_cells:
+        # target neighbouring cell of a damaged ship or random
+        target_cells = self._get_target_cells(opponent_grid)
+
+        if target_cells:
+            target = target_cells[0]
+        elif available_cells:
             target = random.choice(available_cells)
         else:
-            target = [random.randint(0, 7), random.randint(0, 7)]
-        
+            target = [0, 0]
+
         return {
             "combat": {
                 "cell": target,
                 "ability": {"None": {}}
             }
         }
+    
+    # helpers
+        # is valid cell
+        # get H cluster - orientation can be derived here
+        # target: Ns around it
+    def _is_valid_cell(self, row:int, col:int) -> bool:
+        return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE 
+
+    def _get_first_hit_cluster(self, opponent_grid: List[List[str]]) -> List[List[int]]:
+        rows = BOARD_SIZE
+        cols = BOARD_SIZE
+
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        visited = set()
+
+        for r in range(rows):
+            for c in range(cols):
+                if opponent_grid[r][c] == 'H' and (r, c) not in visited:
+                    stack = [(r, c)]
+                    cluster: List[List[int]] = []
+                    # iterates through grid finding an H and append to cluster
+                    while stack:
+                        cluster_row, cluster_c = stack.pop()
+                        if (cluster_row, cluster_c) in visited:
+                            continue
+
+                        visited.add((cluster_row, cluster_c))
+                        cluster.append([cluster_row, cluster_c])
+                        # further visit all 4 neighbours of H, append if unvisited
+                        for dr, dc in directions:
+                            nr, nc = cluster_row + dr, cluster_c + dc
+                            if (
+                                0 <= nr < rows and
+                                0 <= nc < cols and
+                                opponent_grid[nr][nc] == 'H' and
+                                (nr, nc) not in visited
+                            ):
+                                stack.append((nr, nc))
+                    return cluster  # return first ship cluster found
+        return []  # no hit ships found
+ 
+    # checks for cells, H -- ships that have been hit but likely not fully sunk
+        # if ship hit --> keep hitting around ship to sink
+    # cluster of H's with N's around it
+    def _get_target_cells(self, opponent_grid: List[List[str]]) -> List[List[int]]:
+        # first ship / cluster of Hs
+        cluster = self._get_first_hit_cluster(opponent_grid)
+        if not cluster:
+            return []  # no Hs --> no target
+
+        # check neighbours on all sides
+        directions = [(-1,0),(1,0),(0,-1),(0,1)]
+        
+        # return first valid direct neighbour of cluster
+        for r, c in cluster:
+            for dr, dc in directions:
+                nr, nc = r + dr, c + dc
+                if self._is_valid_cell(nr, nc) and opponent_grid[nr][nc] == 'N':
+                    return [[nr, nc]]
+        # no N neighbors found
+        return []
 
 if __name__ == '__main__':
     run_bot(MyBattleshipBot)
