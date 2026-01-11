@@ -23,7 +23,7 @@ from battleship_api import BattleshipBotAPI, run_bot, ABILITY_CODES, BOARD_SIZE
 class MyBattleshipBot(BattleshipBotAPI):
     def ability_selection(self) -> list:
         """Choose 2 abilities for the entire game."""
-        return ["SP", "HS"]  # Sonar Pulse and Hailstorm
+        return ["SP", "RF"]  # Sonar Pulse and Hailstorm
     
     def place_ship_strategy(self, ship_name: str, game_state: dict) -> dict:
         """Place a ship on your board."""
@@ -144,12 +144,16 @@ class MyBattleshipBot(BattleshipBotAPI):
         available_abilities = self._get_available_abilities(game_state)
         opponent_grid = self._get_opponent_grid(game_state)
         available_cells = self._get_available_cells(opponent_grid)
+        ability = {"None": {}}
         
-        # target neighbouring cell of a damaged ship or random
-        target_cells = self._get_target_cells(opponent_grid)
-
-        if target_cells:
-            target = target_cells[0]
+        # 1 random target if not using RF, 2 if using RF
+        target = self._get_target_cell(opponent_grid) 
+        
+        if "RF" in available_abilities:
+            RF_targets = self._get_target_cell(opponent_grid, RFability=True) 
+            ability = {"RF": RF_targets}
+        elif target:
+            target = target[0]
         elif available_cells:
             target = random.choice(available_cells)
         else:
@@ -158,18 +162,14 @@ class MyBattleshipBot(BattleshipBotAPI):
         return {
             "combat": {
                 "cell": target,
-                "ability": {"None": {}}
+                "ability": ability
             }
         }
     
-    # helpers
-        # is valid cell
-        # get H cluster - orientation can be derived here
-        # target: Ns around it
     def _is_valid_cell(self, row:int, col:int) -> bool:
         return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE 
 
-    def _get_first_hit_cluster(self, opponent_grid: List[List[str]]) -> List[List[int]]:
+    def _get_first_hit_cluster(self, opponent_grid: List[List[str]], visited = set()) -> List[List[int]]:
         rows = BOARD_SIZE
         cols = BOARD_SIZE
 
@@ -205,23 +205,38 @@ class MyBattleshipBot(BattleshipBotAPI):
     # checks for cells, H -- ships that have been hit but likely not fully sunk
         # if ship hit --> keep hitting around ship to sink
     # cluster of H's with N's around it
-    def _get_target_cells(self, opponent_grid: List[List[str]]) -> List[List[int]]:
+    def _get_target_cell(self, opponent_grid: List[List[str]], RFability=False) -> List[List[int]]:
         # first ship / cluster of Hs
         cluster = self._get_first_hit_cluster(opponent_grid)
         if not cluster:
             return []  # no Hs --> no target
 
-        # check neighbours on all sides
         directions = [(-1,0),(1,0),(0,-1),(0,1)]
-        
-        # return first valid direct neighbour of cluster
+        targets: List[List[int]] = []
+
+        # collect all valid N neighbours of H cluster 
         for r, c in cluster:
             for dr, dc in directions:
                 nr, nc = r + dr, c + dc
                 if self._is_valid_cell(nr, nc) and opponent_grid[nr][nc] == 'N':
-                    return [[nr, nc]]
-        # no N neighbors found
-        return []
+                    pair = [nr, nc]
+                    if pair not in targets:
+                        targets.append(pair)
 
+        if RFability:
+            # if at least two N neighbours, return first 2
+            if len(targets) >= 2:
+                return [targets[0], targets[1]]
+            # if only one N neighbour, pick a second random N 
+            if len(targets) == 1:
+                other_Ns = [cell for cell in self._get_available_cells(opponent_grid) if cell != targets[0]]
+                if other_Ns:
+                    return [targets[0], random.choice(other_Ns)]
+                # fallback: duplicate the single target so caller gets two entries
+                return [targets[0], targets[0]]
+            return []  # no neighbours found
+        # RFability False: return one neighbour to preserve existing callers
+        return targets[:1]
+        
 if __name__ == '__main__':
     run_bot(MyBattleshipBot)
